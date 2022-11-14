@@ -1,47 +1,87 @@
 import express from 'express';
 import cors from 'cors';
 import dayjs from 'dayjs';
+import { MongoClient } from "mongodb";
+import dotenv from "dotenv";
+dotenv.config();
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 
-const participants = [];
-const messages = [];
-const names = [];
+const mongoClient = new MongoClient(process.env.MONGO_URI);
+let db;
+let participants;
+let messages;
 
-app.post('/participants', (req, res) => {
-    let newParticipant = req.body;
-    newParticipant.lastStatus = Date.now();
-    if (!names.includes(req.body.name)) {
-        names.push(req.body.name);
-        participants.push(newParticipant);
-        messages.push({
-            from: req.body.name,
-            to: 'Todos',
-            text: 'entra na sala...',
-            type: 'status',
-            time: dayjs().format('H:m:s'),
-        });
-        res.sendStatus(200);
-        return;
-    } else {
-        res.sendStatus(400);
-        return;
-    }
+mongoClient.connect().then(() => {
+    db = mongoClient.db("batePapoUol");
+    messages = db.collection("messages");
+    participants = db.collection("participants");
+});
+
+
+app.post('/participants', async (req, res) => {
+    
+    const newParticipant = req.body;
+    const getParticipants = await participants.find().toArray()
+    getParticipants.forEach((participant) =>{
+            if(participant.name === newParticipant.name){
+            res.sendStatus(409)
+        }else{
+            try{
+        
+                newParticipant.lastStatus = Date.now();
+                if (!names.includes(req.body.name)) {
+                    names.push(req.body.name);
+                    participants.push(newParticipant);
+                    messages.push({
+                        from: req.body.name,
+                        to: 'Todos',
+                        text: 'entra na sala...',
+                        type: 'status',
+                        time: dayjs().format('HH:MM:SS'),
+                    });
+            
+                    participants.insertOne(req.body).then(() => {
+                        res.sendStatus(201)
+                        return;
+                    })
+                    
+                } else {
+                    res.sendStatus(400);
+                    return;
+                }
+            }catch{}
+            
+        }
+        
+        })
+   
 });
 
 app.get('/participants', (req, res) => {
-    res.send(participants);
+    participants.find().toArray().then((participants) => {
+        res.send(participants);
+    })
+
 });
 
-app.get('/messages', (req, res) => {
-    const limit = req.query.limit;
-    const filterMessages = messages.filter((m, i) => {
-        return m.to === 'Todos' || m.to === req.headers.user;
-    });
-    res.send(filterMessages.slice(-limit));
+app.get('/messages', async (req, res) => {
+    try{
+        const limit = req.query.limit;
+        const newMessages = await messages.find().toArray(); 
+        console.log(newMessages);
+        const filterMessages = newMessages.filter((m, i) => {
+            return m.to === 'Todos' || m.to === req.headers.user;
+        });
+        res.send(filterMessages.slice(-limit));
+    }
+    catch{
+
+    }
+    
 });
 
 app.post('/messages', (req, res) => {
@@ -61,8 +101,12 @@ app.post('/messages', (req, res) => {
         newMessages.from = username;
         newMessages.time = dayjs().format('HH:MM:SS');
         messages.push(newMessages);
-        res.sendStatus(201);
+
     }
+    messages.insertOne(req.body).then(() => {
+        res.sendStatus(200);
+        return;
+    })
 });
 
 app.post('/status', (req, res) => {
@@ -78,6 +122,7 @@ app.post('/status', (req, res) => {
 });
 
 setInterval(() => {
+    db.collection("participants").
     participants.forEach((p, i) => {
         if (p.lastStatus < Date.now() - 10000) {
             messages.push({
@@ -85,13 +130,14 @@ setInterval(() => {
                 to: 'Todos',
                 text: 'sai da sala...',
                 type: 'status',
-                time: `${dayjs().format('H:m:s')}`,
+                time: `${dayjs().format('HH:MM:SS')}`,
             });
             participants.splice(i, 1);
             names.splice(i, 1);
         }
     });
-}, 15000);
+}, 15000); 
+
 
 app.listen(5000, () => {
     console.log('Tudo certo pra dar errado');
